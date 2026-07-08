@@ -2,8 +2,8 @@
  * Mission Control Demo — server
  *
  * The three things a real telemetry SaaS backend does, in miniature:
- *   1. INGEST  — here, a built-in simulator generates fake drone telemetry
- *                (in production, devices would POST/MQTT their data in)
+ *   1. INGEST  — a built-in simulator generates telemetry for a small fleet
+ *                (in production, customer devices would POST/MQTT their data in)
  *   2. STORE   — an in-memory history buffer per channel
  *                (in production: a time-series DB like InfluxDB/Timescale)
  *   3. SERVE   — REST endpoint for history + WebSocket for live data,
@@ -19,81 +19,126 @@ const PORT = process.env.PORT || 8080;
 const HISTORY_MS = 2 * 60 * 60 * 1000; // keep 2 hours of history
 
 // ---------------------------------------------------------------------------
-// Telemetry dictionary: one drone, six channels
+// The fleet: three vehicles, each with its own telemetry channels
 // ---------------------------------------------------------------------------
-const DICTIONARY = {
-  name: 'Drone Alpha',
-  key: 'drone-1',
-  measurements: [
-    { key: 'battery.soc',     name: 'Battery Charge',   units: '%',    min: 0,   max: 100 },
-    { key: 'battery.voltage', name: 'Battery Voltage',  units: 'V',    min: 9,   max: 13 },
-    { key: 'altitude',        name: 'Altitude',         units: 'm',    min: 0,   max: 150 },
-    { key: 'speed',           name: 'Ground Speed',     units: 'm/s',  min: 0,   max: 20 },
-    { key: 'signal.rssi',     name: 'Signal Strength',  units: 'dBm',  min: -95, max: -30 },
-    { key: 'motor.temp',      name: 'Motor Temperature',units: '°C',   min: 15,  max: 90 }
+const CHANNELS = {
+  drone: [
+    { key: 'battery.soc',     name: 'Battery Charge',    units: '%',   min: 0,   max: 100 },
+    { key: 'battery.voltage', name: 'Battery Voltage',   units: 'V',   min: 9,   max: 13 },
+    { key: 'altitude',        name: 'Altitude',          units: 'm',   min: 0,   max: 150 },
+    { key: 'speed',           name: 'Ground Speed',      units: 'm/s', min: 0,   max: 20 },
+    { key: 'heading',         name: 'Heading',           units: '°',   min: 0,   max: 360 },
+    { key: 'signal.rssi',     name: 'Signal Strength',   units: 'dBm', min: -95, max: -30 },
+    { key: 'motor.temp',      name: 'Motor Temperature', units: '°C',  min: 15,  max: 90 },
+    { key: 'vibration',       name: 'Vibration',         units: 'g',   min: 0,   max: 3 },
+    { key: 'gps.satellites',  name: 'GPS Satellites',    units: '',    min: 0,   max: 24 }
+  ],
+  rover: [
+    { key: 'battery.soc',     name: 'Battery Charge',    units: '%',   min: 0,   max: 100 },
+    { key: 'battery.current', name: 'Battery Current',   units: 'A',   min: 0,   max: 40 },
+    { key: 'speed',           name: 'Ground Speed',      units: 'm/s', min: 0,   max: 4 },
+    { key: 'heading',         name: 'Heading',           units: '°',   min: 0,   max: 360 },
+    { key: 'signal.rssi',     name: 'Signal Strength',   units: 'dBm', min: -95, max: -30 },
+    { key: 'motor.temp',      name: 'Drive Temperature', units: '°C',  min: 15,  max: 80 },
+    { key: 'chassis.tilt',    name: 'Chassis Tilt',      units: '°',   min: 0,   max: 45 },
+    { key: 'internal.temp',   name: 'Internal Temp',     units: '°C',  min: 10,  max: 60 }
   ]
+};
+
+const VEHICLES = [
+  { key: 'alpha',   name: 'Drone Alpha',   kind: 'drone', phase: 0 },
+  { key: 'bravo',   name: 'Drone Bravo',   kind: 'drone', phase: 120 },
+  { key: 'charlie', name: 'Rover Charlie', kind: 'rover', phase: 0 }
+];
+
+const DICTIONARY = {
+  name: 'Fleet',
+  key: 'fleet',
+  vehicles: VEHICLES.map((v) => ({
+    key: v.key,
+    name: v.name,
+    kind: v.kind,
+    measurements: CHANNELS[v.kind].map((c) => ({
+      ...c,
+      key: v.key + '.' + c.key // globally unique, e.g. "alpha.battery.soc"
+    }))
+  }))
 };
 
 // ---------------------------------------------------------------------------
 // STORE: in-memory history, one ring buffer per channel
 // ---------------------------------------------------------------------------
-const history = {}; // key -> [{timestamp, value}, ...]
-DICTIONARY.measurements.forEach((m) => (history[m.key] = []));
+const history = {};
+DICTIONARY.vehicles.forEach((v) =>
+  v.measurements.forEach((m) => (history[m.key] = []))
+);
 
 function record(key, timestamp, value) {
   const buf = history[key];
   buf.push({ timestamp, value, id: key });
-  // drop points older than HISTORY_MS
   const cutoff = timestamp - HISTORY_MS;
   while (buf.length && buf[0].timestamp < cutoff) buf.shift();
 }
 
 // ---------------------------------------------------------------------------
-// INGEST (simulated): a fake drone flight that never ends
+// INGEST (simulated): flight/drive profiles that never end
 // ---------------------------------------------------------------------------
-const state = {
-  t: 0,
-  soc: 100,
-  voltage: 12.6,
-  altitude: 0,
-  speed: 0,
-  rssi: -40,
-  motorTemp: 22
-};
+function makeState(v) {
+  return {
+    t: v.phase, soc: 100 - v.phase / 10, voltage: 12.6, altitude: 0,
+    speed: 0, heading: Math.random() * 360, rssi: -40, motorTemp: 22,
+    vibration: 0.2, sats: 12, current: 5, tilt: 2, internalTemp: 25
+  };
+}
+const states = new Map(VEHICLES.map((v) => [v.key, makeState(v)]));
 
-function stepSimulation() {
-  const s = state;
+function stepVehicle(v) {
+  const s = states.get(v.key);
   s.t += 1;
 
-  // battery drains slowly, voltage follows
-  s.soc = Math.max(0, s.soc - 0.01 - Math.random() * 0.01);
+  s.soc = Math.max(0, s.soc - 0.008 - Math.random() * 0.008);
   if (s.soc < 1) s.soc = 100; // "battery swap" so the demo runs forever
   s.voltage = 9.6 + (s.soc / 100) * 3 + (Math.random() - 0.5) * 0.05;
+  s.heading = (s.heading + (Math.random() - 0.45) * 6 + 360) % 360;
+  s.rssi = -40 - (v.kind === 'drone' ? s.altitude / 8 : s.t % 30) + (Math.random() - 0.5) * 4;
 
-  // altitude: climb to ~100m, then wander
-  const targetAlt = 100 + 20 * Math.sin(s.t / 60);
-  s.altitude += (targetAlt - s.altitude) * 0.02 + (Math.random() - 0.5) * 0.8;
-  s.altitude = Math.max(0, s.altitude);
+  if (v.kind === 'drone') {
+    const targetAlt = 100 + 25 * Math.sin((s.t + v.phase) / 60);
+    s.altitude = Math.max(0, s.altitude + (targetAlt - s.altitude) * 0.02 + (Math.random() - 0.5) * 0.8);
+    s.speed = Math.max(0, Math.min(18, s.speed + (Math.random() - 0.5) * 1.2));
+    s.vibration = Math.max(0.05, Math.min(3, 0.2 + s.speed / 10 + (Math.random() - 0.5) * 0.2));
+    s.sats = Math.max(6, Math.min(20, s.sats + Math.round((Math.random() - 0.5) * 2)));
+    const targetTemp = 25 + s.speed * 2.5;
+    s.motorTemp += (targetTemp - s.motorTemp) * 0.05 + (Math.random() - 0.5) * 0.4;
+    return {
+      [v.key + '.battery.soc']: round(s.soc, 1),
+      [v.key + '.battery.voltage']: round(s.voltage, 2),
+      [v.key + '.altitude']: round(s.altitude, 1),
+      [v.key + '.speed']: round(s.speed, 2),
+      [v.key + '.heading']: round(s.heading, 0),
+      [v.key + '.signal.rssi']: round(s.rssi, 1),
+      [v.key + '.motor.temp']: round(s.motorTemp, 1),
+      [v.key + '.vibration']: round(s.vibration, 2),
+      [v.key + '.gps.satellites']: s.sats
+    };
+  }
 
-  // speed wanders between 0 and 15 m/s
-  s.speed = Math.max(0, Math.min(18, s.speed + (Math.random() - 0.5) * 1.2));
-
-  // signal strength loosely tied to altitude + noise
-  s.rssi = -40 - s.altitude / 8 + (Math.random() - 0.5) * 4;
-
-  // motor temp rises with speed, cools otherwise
-  const targetTemp = 25 + s.speed * 2.5;
+  // rover
+  s.speed = Math.max(0, Math.min(3.5, s.speed + (Math.random() - 0.5) * 0.4));
+  s.current = Math.max(2, Math.min(38, 5 + s.speed * 8 + (Math.random() - 0.5) * 2));
+  s.tilt = Math.max(0, Math.min(40, s.tilt + (Math.random() - 0.5) * 2));
+  const targetTemp = 25 + s.speed * 10;
   s.motorTemp += (targetTemp - s.motorTemp) * 0.05 + (Math.random() - 0.5) * 0.4;
-
-  const now = Date.now();
+  s.internalTemp += ((28 + s.current / 4) - s.internalTemp) * 0.03 + (Math.random() - 0.5) * 0.2;
   return {
-    'battery.soc': round(s.soc, 1),
-    'battery.voltage': round(s.voltage, 2),
-    'altitude': round(s.altitude, 1),
-    'speed': round(s.speed, 2),
-    'signal.rssi': round(s.rssi, 1),
-    'motor.temp': round(s.motorTemp, 1),
-    timestamp: now
+    [v.key + '.battery.soc']: round(s.soc, 1),
+    [v.key + '.battery.current']: round(s.current, 1),
+    [v.key + '.speed']: round(s.speed, 2),
+    [v.key + '.heading']: round(s.heading, 0),
+    [v.key + '.signal.rssi']: round(s.rssi, 1),
+    [v.key + '.motor.temp']: round(s.motorTemp, 1),
+    [v.key + '.chassis.tilt']: round(s.tilt, 1),
+    [v.key + '.internal.temp']: round(s.internalTemp, 1)
   };
 }
 
@@ -107,14 +152,11 @@ function round(v, dp) {
 // ---------------------------------------------------------------------------
 const app = express();
 
-// Open MCT's prebuilt bundle straight out of node_modules
 app.use('/openmct', express.static(path.join(__dirname, 'node_modules/openmct/dist')));
 app.use('/', express.static(__dirname));
 
-// telemetry dictionary (what channels exist)
 app.get('/dictionary.json', (req, res) => res.json(DICTIONARY));
 
-// historical telemetry: /telemetry/battery.soc/history?start=...&end=...
 app.get('/telemetry/:key/history', (req, res) => {
   const buf = history[req.params.key];
   if (!buf) return res.status(404).json({ error: 'unknown telemetry point' });
@@ -125,9 +167,8 @@ app.get('/telemetry/:key/history', (req, res) => {
 
 const server = http.createServer(app);
 
-// realtime telemetry over WebSocket
 const wss = new WebSocketServer({ server, path: '/realtime' });
-const subscriptions = new Map(); // ws -> Set of keys
+const subscriptions = new Map();
 
 wss.on('connection', (ws) => {
   subscriptions.set(ws, new Set());
@@ -142,19 +183,20 @@ wss.on('connection', (ws) => {
   ws.on('close', () => subscriptions.delete(ws));
 });
 
-// the heartbeat: step the simulator once per second, store + broadcast
 setInterval(() => {
-  const sample = stepSimulation();
-  const ts = sample.timestamp;
-  DICTIONARY.measurements.forEach((m) => {
-    const point = { id: m.key, timestamp: ts, value: sample[m.key] };
-    record(m.key, ts, sample[m.key]);
-    for (const [ws, subs] of subscriptions) {
-      if (subs.has(m.key) && ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify(point));
+  const ts = Date.now();
+  for (const v of VEHICLES) {
+    const sample = stepVehicle(v);
+    for (const [key, value] of Object.entries(sample)) {
+      record(key, ts, value);
+      const point = { id: key, timestamp: ts, value };
+      for (const [ws, subs] of subscriptions) {
+        if (subs.has(key) && ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify(point));
+        }
       }
     }
-  });
+  }
 }, 1000);
 
 server.listen(PORT, () => {
@@ -162,5 +204,5 @@ server.listen(PORT, () => {
   console.log('  Mission Control Demo is running');
   console.log(`  Open your browser at:  http://localhost:${PORT}`);
   console.log('');
-  console.log('  Drone Alpha is flying and sending telemetry once per second.');
+  console.log('  Fleet is live: Drone Alpha, Drone Bravo, Rover Charlie.');
 });

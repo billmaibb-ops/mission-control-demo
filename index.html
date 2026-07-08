@@ -36,6 +36,39 @@
     openmct.install(openmct.plugins.Espresso());
     openmct.install(openmct.plugins.MyItems());
     openmct.install(openmct.plugins.UTCTimeSystem());
+
+    // The full NASA feature set. Installed one-by-one with a guard so a
+    // single incompatible plugin can never blank the whole app.
+    function tryInstall(name, args) {
+      try {
+        if (!openmct.plugins[name]) throw new Error('plugin not in this build');
+        openmct.install(openmct.plugins[name].apply(null, args || []));
+      } catch (e) {
+        console.warn('Skipping plugin ' + name + ': ' + e.message);
+      }
+    }
+    tryInstall('DisplayLayout', [{ showAsView: ['summary-widget'] }]);
+    tryInstall('SummaryWidget');                        // status widgets w/ rules & colors
+    tryInstall('Notebook');                             // mission notebook w/ snapshots
+    tryInstall('LADTable');                             // latest-value tables
+    tryInstall('BarChart');                             // live bar charts
+    tryInstall('ScatterPlot');                          // scatter plots
+    tryInstall('Gauge');                                // dial & meter gauges
+    tryInstall('Timeline');                             // mission timelines
+    tryInstall('PlanLayout', [{ creatable: true }]);    // activity plans
+    tryInstall('Timelist');                             // event time lists
+    tryInstall('Hyperlink');                            // link tiles/buttons
+    tryInstall('Clock', [{ enableClockIndicator: true }]);
+    tryInstall('Timer');                                // countdown/elapsed timers
+    tryInstall('TelemetryMean');                        // derived rolling-average channels
+    tryInstall('AutoflowView', [{ type: 'telemetry.panel' }]);
+    tryInstall('Filters', [['table', 'telemetry.plot.overlay']]);
+    tryInstall('ObjectMigration');
+    tryInstall('ClearData', [
+      ['table', 'telemetry.plot.overlay', 'telemetry.plot.stacked'],
+      { indicator: true }
+    ]);
+
     openmct.install(
       openmct.plugins.Conductor({
         menuOptions: [

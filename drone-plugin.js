@@ -1,28 +1,35 @@
 /**
- * DronePlugin — teaches Open MCT about our drone.
+ * FleetPlugin — teaches Open MCT about our vehicle fleet.
  *
  * Three parts (this is the pattern every Open MCT integration follows):
- *   1. Object provider   — "what things exist?" (the drone + its channels)
+ *   1. Object provider     — "what things exist?" (fleet > vehicles > channels)
  *   2. Historical provider — "give me past data" (REST call to /telemetry/...)
  *   3. Realtime provider   — "stream me new data" (WebSocket /realtime)
  */
 function DronePlugin() {
-  const NAMESPACE = 'drone.taxonomy';
-  const DRONE_KEY = 'drone-1';
+  const NAMESPACE = 'fleet.taxonomy';
+  const FLEET_KEY = 'fleet';
 
   return function install(openmct) {
     const dictionaryPromise = fetch('/dictionary.json').then((r) => r.json());
 
+    function findMeasurement(dict, key) {
+      for (const v of dict.vehicles) {
+        const m = v.measurements.find((x) => x.key === key);
+        if (m) return { vehicle: v, measurement: m };
+      }
+      return null;
+    }
+
     // -----------------------------------------------------------------
-    // 1. Objects: a root "Drone Alpha" folder containing one object per
-    //    telemetry channel from the dictionary.
+    // 1. Objects: Fleet folder > vehicle folders > telemetry points
     // -----------------------------------------------------------------
-    openmct.objects.addRoot({ namespace: NAMESPACE, key: DRONE_KEY });
+    openmct.objects.addRoot({ namespace: NAMESPACE, key: FLEET_KEY });
 
     openmct.objects.addProvider(NAMESPACE, {
       get(identifier) {
         return dictionaryPromise.then((dict) => {
-          if (identifier.key === DRONE_KEY) {
+          if (identifier.key === FLEET_KEY) {
             return {
               identifier,
               name: dict.name,
@@ -30,20 +37,32 @@ function DronePlugin() {
               location: 'ROOT'
             };
           }
-          const m = dict.measurements.find((x) => x.key === identifier.key);
+
+          const vehicle = dict.vehicles.find((v) => v.key === identifier.key);
+          if (vehicle) {
+            return {
+              identifier,
+              name: vehicle.name,
+              type: 'folder',
+              location: NAMESPACE + ':' + FLEET_KEY
+            };
+          }
+
+          const found = findMeasurement(dict, identifier.key);
+          if (!found) return undefined;
           return {
             identifier,
-            name: m.name,
-            type: 'drone.telemetry',
+            name: found.measurement.name,
+            type: 'fleet.telemetry',
             telemetry: {
               values: [
                 {
                   key: 'value',
                   name: 'Value',
-                  units: m.units,
+                  units: found.measurement.units,
                   format: 'float',
-                  min: m.min,
-                  max: m.max,
+                  min: found.measurement.min,
+                  max: found.measurement.max,
                   hints: { range: 1 }
                 },
                 {
@@ -55,29 +74,53 @@ function DronePlugin() {
                 }
               ]
             },
-            location: NAMESPACE + ':' + DRONE_KEY
+            location: NAMESPACE + ':' + found.vehicle.key
           };
         });
       }
     });
 
+    // Fleet folder contains the vehicles
     openmct.composition.addProvider({
       appliesTo(domainObject) {
         return (
           domainObject.identifier.namespace === NAMESPACE &&
-          domainObject.identifier.key === DRONE_KEY
+          domainObject.identifier.key === FLEET_KEY
         );
       },
       load() {
         return dictionaryPromise.then((dict) =>
-          dict.measurements.map((m) => ({ namespace: NAMESPACE, key: m.key }))
+          dict.vehicles.map((v) => ({ namespace: NAMESPACE, key: v.key }))
         );
       }
     });
 
-    openmct.types.addType('drone.telemetry', {
-      name: 'Drone Telemetry Point',
-      description: 'A live telemetry channel from the drone',
+    // Each vehicle folder contains its telemetry points
+    openmct.composition.addProvider({
+      appliesTo(domainObject) {
+        return (
+          domainObject.identifier.namespace === NAMESPACE &&
+          domainObject.identifier.key !== FLEET_KEY &&
+          domainObject.type === 'folder'
+        );
+      },
+      load(domainObject) {
+        return dictionaryPromise.then((dict) => {
+          const vehicle = dict.vehicles.find(
+            (v) => v.key === domainObject.identifier.key
+          );
+          if (!vehicle) return [];
+          return vehicle.measurements.map((m) => ({
+            namespace: NAMESPACE,
+            key: m.key
+          }));
+        });
+      }
+    });
+
+    openmct.types.addType('fleet.telemetry', {
+      name: 'Vehicle Telemetry Point',
+      description: 'A live telemetry channel from a fleet vehicle',
       cssClass: 'icon-telemetry'
     });
 
@@ -86,7 +129,7 @@ function DronePlugin() {
     // -----------------------------------------------------------------
     openmct.telemetry.addProvider({
       supportsRequest(domainObject) {
-        return domainObject.type === 'drone.telemetry';
+        return domainObject.type === 'fleet.telemetry';
       },
       request(domainObject, options) {
         const url =
@@ -100,7 +143,7 @@ function DronePlugin() {
     // -----------------------------------------------------------------
     // 3. Realtime telemetry: WebSocket
     // -----------------------------------------------------------------
-    const listeners = {}; // telemetry key -> Set of callbacks
+    const listeners = {};
     let socket;
     let openPromise;
 
@@ -115,13 +158,13 @@ function DronePlugin() {
       openPromise = new Promise((resolve) => {
         socket.onopen = () => resolve(socket);
       });
-      socket.onclose = () => { openPromise = null; }; // allow reconnect
+      socket.onclose = () => { openPromise = null; };
       return openPromise;
     }
 
     openmct.telemetry.addProvider({
       supportsSubscribe(domainObject) {
-        return domainObject.type === 'drone.telemetry';
+        return domainObject.type === 'fleet.telemetry';
       },
       subscribe(domainObject, callback) {
         const key = domainObject.identifier.key;
