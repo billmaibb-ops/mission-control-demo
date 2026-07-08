@@ -1,49 +1,78 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">
   <title>Mission Control Demo</title>
   <script src="/openmct/openmct.js"></script>
-</head>
-<body>
   <script src="/drone-plugin.js"></script>
-  <script>
+  <script defer>
+    // If anything goes wrong, show it on screen instead of a blank page
+    function showError(msg) {
+      var el = document.getElementById('errbar');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'errbar';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+          'background:#b00020;color:#fff;font:13px monospace;padding:8px;white-space:pre-wrap;';
+        document.body.appendChild(el);
+      }
+      el.textContent += msg + '\n';
+    }
+    window.addEventListener('error', function (e) {
+      showError('Error: ' + (e.message || e.type) + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      showError('Promise error: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+    });
+
+    const THIRTY_SECONDS = 30 * 1000;
+    const FIFTEEN_MINUTES = 15 * 60 * 1000;
+    const ONE_HOUR = 60 * 60 * 1000;
+
     openmct.setAssetPath('/openmct');
 
-    // Standard Open MCT plugins
-    openmct.install(openmct.plugins.LocalStorage());   // saves user layouts in the browser
-    openmct.install(openmct.plugins.MyItems());        // "My Items" folder for user-made displays
+    openmct.install(openmct.plugins.LocalStorage());
+    openmct.install(openmct.plugins.Espresso());
+    openmct.install(openmct.plugins.MyItems());
     openmct.install(openmct.plugins.UTCTimeSystem());
-    openmct.install(openmct.plugins.Espresso());       // dark mission-control theme
+    openmct.install(
+      openmct.plugins.Conductor({
+        menuOptions: [
+          {
+            name: 'Fixed',
+            timeSystem: 'utc',
+            bounds: {
+              start: Date.now() - FIFTEEN_MINUTES,
+              end: Date.now()
+            },
+            records: 10
+          },
+          {
+            name: 'Realtime',
+            timeSystem: 'utc',
+            clock: 'local',
+            clockOffsets: {
+              start: -FIFTEEN_MINUTES,
+              end: THIRTY_SECONDS
+            },
+            presets: [
+              { label: '1 Hour', bounds: { start: -ONE_HOUR, end: THIRTY_SECONDS } },
+              { label: '15 Minutes', bounds: { start: -FIFTEEN_MINUTES, end: THIRTY_SECONDS } }
+            ]
+          }
+        ]
+      })
+    );
 
-    // Time conductor: default to "live" mode showing the last 15 minutes
-    openmct.install(openmct.plugins.Conductor({
-      menuOptions: [
-        { name: 'Realtime', timeSystem: 'utc', clock: 'local',
-          clockOffsets: { start: -15 * 60 * 1000, end: 30 * 1000 } },
-        { name: 'Fixed', timeSystem: 'utc',
-          bounds: { start: Date.now() - 15 * 60 * 1000, end: Date.now() } }
-      ]
-    }));
-
-    // Set initial time mode (API name changed across versions, so try both)
-    try {
-      if (openmct.time.setClock) {
-        openmct.time.setClock('local');
-        openmct.time.setClockOffsets({ start: -15 * 60 * 1000, end: 30 * 1000 });
-        openmct.time.setTimeSystem('utc');
-      } else {
-        openmct.time.clock('local', { start: -15 * 60 * 1000, end: 30 * 1000 });
-        openmct.time.timeSystem('utc');
-      }
-    } catch (e) {
-      console.warn('Time init fallback:', e);
-    }
-
-    // Our plugin: the drone, its telemetry channels, live + historical data
+    // Our drone: objects, live data, and history
     openmct.install(DronePlugin());
 
-    openmct.start();
+    document.addEventListener('DOMContentLoaded', function () {
+      openmct.start();
+    });
   </script>
+</head>
+<body>
 </body>
 </html>
