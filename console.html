@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">
+  <title>LUNA STATION — Console</title>
+  <script src="/openmct/openmct.js"></script>
+  <script src="/drone-plugin.js"></script>
+  <link rel="stylesheet" href="/mission-theme.css">
+  <script defer>
+    // If anything goes wrong, show it on screen instead of a blank page
+    function showError(msg) {
+      var el = document.getElementById('errbar');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'errbar';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+          'background:#b00020;color:#fff;font:13px monospace;padding:8px;white-space:pre-wrap;';
+        document.body.appendChild(el);
+      }
+      el.textContent += msg + '\n';
+    }
+    window.addEventListener('error', function (e) {
+      showError('Error: ' + (e.message || e.type) + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      showError('Promise error: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+    });
+
+    const THIRTY_SECONDS = 30 * 1000;
+    const FIFTEEN_MINUTES = 15 * 60 * 1000;
+    const ONE_HOUR = 60 * 60 * 1000;
+
+    openmct.setAssetPath('/openmct');
+
+    openmct.install(openmct.plugins.LocalStorage());
+    openmct.install(openmct.plugins.Espresso());
+    openmct.install(openmct.plugins.MyItems());
+    openmct.install(openmct.plugins.UTCTimeSystem());
+
+    // The full NASA feature set. Installed one-by-one with a guard so a
+    // single incompatible plugin can never blank the whole app.
+    function tryInstall(name, args) {
+      try {
+        if (!openmct.plugins[name]) throw new Error('plugin not in this build');
+        openmct.install(openmct.plugins[name].apply(null, args || []));
+      } catch (e) {
+        console.warn('Skipping plugin ' + name + ': ' + e.message);
+      }
+    }
+    tryInstall('DisplayLayout', [{ showAsView: ['summary-widget'] }]);
+    tryInstall('SummaryWidget');                        // status widgets w/ rules & colors
+    tryInstall('Notebook');                             // mission notebook w/ snapshots
+    tryInstall('LADTable');                             // latest-value tables
+    tryInstall('BarChart');                             // live bar charts
+    tryInstall('ScatterPlot');                          // scatter plots
+    tryInstall('Gauge');                                // dial & meter gauges
+    tryInstall('Timeline');                             // mission timelines
+    tryInstall('PlanLayout', [{ creatable: true }]);    // activity plans
+    tryInstall('Timelist');                             // event time lists
+    tryInstall('Hyperlink');                            // link tiles/buttons
+    tryInstall('Clock', [{ enableClockIndicator: true }]);
+    tryInstall('Timer');                                // countdown/elapsed timers
+    tryInstall('TelemetryMean');                        // derived rolling-average channels
+    tryInstall('AutoflowView', [{ type: 'telemetry.panel' }]);
+    tryInstall('Filters', [['table', 'telemetry.plot.overlay']]);
+    tryInstall('ObjectMigration');
+    tryInstall('ClearData', [
+      ['table', 'telemetry.plot.overlay', 'telemetry.plot.stacked'],
+      { indicator: true }
+    ]);
+
+    openmct.install(
+      openmct.plugins.Conductor({
+        menuOptions: [
+          {
+            name: 'Fixed',
+            timeSystem: 'utc',
+            bounds: {
+              start: Date.now() - FIFTEEN_MINUTES,
+              end: Date.now()
+            },
+            records: 10
+          },
+          {
+            name: 'Realtime',
+            timeSystem: 'utc',
+            clock: 'local',
+            clockOffsets: {
+              start: -FIFTEEN_MINUTES,
+              end: THIRTY_SECONDS
+            },
+            presets: [
+              { label: '1 Hour', bounds: { start: -ONE_HOUR, end: THIRTY_SECONDS } },
+              { label: '15 Minutes', bounds: { start: -FIFTEEN_MINUTES, end: THIRTY_SECONDS } }
+            ]
+          }
+        ]
+      })
+    );
+
+    // Our drone: objects, live data, and history
+    openmct.install(DronePlugin());
+
+    document.addEventListener('DOMContentLoaded', function () {
+      openmct.start();
+    });
+  </script>
+</head>
+<body>
+</body>
+</html>

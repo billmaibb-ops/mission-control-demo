@@ -1,111 +1,222 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">
-  <title>Mission Control Demo</title>
-  <script src="/openmct/openmct.js"></script>
-  <script src="/drone-plugin.js"></script>
-  <script defer>
-    // If anything goes wrong, show it on screen instead of a blank page
-    function showError(msg) {
-      var el = document.getElementById('errbar');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'errbar';
-        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
-          'background:#b00020;color:#fff;font:13px monospace;padding:8px;white-space:pre-wrap;';
-        document.body.appendChild(el);
-      }
-      el.textContent += msg + '\n';
-    }
-    window.addEventListener('error', function (e) {
-      showError('Error: ' + (e.message || e.type) + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
-    });
-    window.addEventListener('unhandledrejection', function (e) {
-      showError('Promise error: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
-    });
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LUNA STATION — Mission Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cyan: #37e8ff;
+    --amber: #ffb547;
+    --bg: #05070f;
+    --panel: rgba(13, 20, 38, 0.72);
+    --line: rgba(55, 232, 255, 0.18);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: #dfe9f5;
+    font-family: 'IBM Plex Mono', monospace;
+    overflow-x: hidden;
+    position: relative;
+  }
 
-    const THIRTY_SECONDS = 30 * 1000;
-    const FIFTEEN_MINUTES = 15 * 60 * 1000;
-    const ONE_HOUR = 60 * 60 * 1000;
+  /* starfield */
+  .stars, .stars2 {
+    position: fixed; inset: 0; pointer-events: none;
+    background-repeat: repeat;
+    z-index: 0;
+  }
+  .stars {
+    background-image:
+      radial-gradient(1px 1px at 20px 30px, #fff, transparent),
+      radial-gradient(1px 1px at 130px 80px, #9fd8ff, transparent),
+      radial-gradient(1.5px 1.5px at 220px 150px, #fff, transparent),
+      radial-gradient(1px 1px at 300px 60px, #ffd9a0, transparent),
+      radial-gradient(1px 1px at 360px 200px, #fff, transparent);
+    background-size: 400px 240px;
+    animation: drift 120s linear infinite;
+    opacity: .8;
+  }
+  .stars2 {
+    background-image:
+      radial-gradient(1px 1px at 60px 120px, #cfeaff, transparent),
+      radial-gradient(1px 1px at 180px 40px, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 260px 190px, #b8fff1, transparent);
+    background-size: 320px 220px;
+    animation: drift 200s linear infinite reverse;
+    opacity: .5;
+  }
+  @keyframes drift { from {background-position: 0 0;} to {background-position: 1000px 500px;} }
 
-    openmct.setAssetPath('/openmct');
+  /* moon glow horizon */
+  .horizon {
+    position: fixed; left: 50%; bottom: -42vh; transform: translateX(-50%);
+    width: 140vw; height: 70vh; border-radius: 50% 50% 0 0;
+    background: radial-gradient(ellipse at center top, #1a2742 0%, #0c1322 45%, transparent 70%);
+    box-shadow: 0 -8px 80px rgba(55, 232, 255, .12);
+    z-index: 0;
+  }
 
-    openmct.install(openmct.plugins.LocalStorage());
-    openmct.install(openmct.plugins.Espresso());
-    openmct.install(openmct.plugins.MyItems());
-    openmct.install(openmct.plugins.UTCTimeSystem());
+  .wrap { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 48px 24px 80px; }
 
-    // The full NASA feature set. Installed one-by-one with a guard so a
-    // single incompatible plugin can never blank the whole app.
-    function tryInstall(name, args) {
-      try {
-        if (!openmct.plugins[name]) throw new Error('plugin not in this build');
-        openmct.install(openmct.plugins[name].apply(null, args || []));
-      } catch (e) {
-        console.warn('Skipping plugin ' + name + ': ' + e.message);
-      }
-    }
-    tryInstall('DisplayLayout', [{ showAsView: ['summary-widget'] }]);
-    tryInstall('SummaryWidget');                        // status widgets w/ rules & colors
-    tryInstall('Notebook');                             // mission notebook w/ snapshots
-    tryInstall('LADTable');                             // latest-value tables
-    tryInstall('BarChart');                             // live bar charts
-    tryInstall('ScatterPlot');                          // scatter plots
-    tryInstall('Gauge');                                // dial & meter gauges
-    tryInstall('Timeline');                             // mission timelines
-    tryInstall('PlanLayout', [{ creatable: true }]);    // activity plans
-    tryInstall('Timelist');                             // event time lists
-    tryInstall('Hyperlink');                            // link tiles/buttons
-    tryInstall('Clock', [{ enableClockIndicator: true }]);
-    tryInstall('Timer');                                // countdown/elapsed timers
-    tryInstall('TelemetryMean');                        // derived rolling-average channels
-    tryInstall('AutoflowView', [{ type: 'telemetry.panel' }]);
-    tryInstall('Filters', [['table', 'telemetry.plot.overlay']]);
-    tryInstall('ObjectMigration');
-    tryInstall('ClearData', [
-      ['table', 'telemetry.plot.overlay', 'telemetry.plot.stacked'],
-      { indicator: true }
-    ]);
+  .topline {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; letter-spacing: .18em; color: #7fa3c0;
+    border-bottom: 1px solid var(--line); padding-bottom: 14px;
+  }
+  .topline .live { color: var(--cyan); }
+  .topline .live::before {
+    content: '●'; margin-right: 6px; animation: blink 1.6s infinite;
+  }
+  @keyframes blink { 0%,100% {opacity: 1;} 50% {opacity: .25;} }
 
-    openmct.install(
-      openmct.plugins.Conductor({
-        menuOptions: [
-          {
-            name: 'Fixed',
-            timeSystem: 'utc',
-            bounds: {
-              start: Date.now() - FIFTEEN_MINUTES,
-              end: Date.now()
-            },
-            records: 10
-          },
-          {
-            name: 'Realtime',
-            timeSystem: 'utc',
-            clock: 'local',
-            clockOffsets: {
-              start: -FIFTEEN_MINUTES,
-              end: THIRTY_SECONDS
-            },
-            presets: [
-              { label: '1 Hour', bounds: { start: -ONE_HOUR, end: THIRTY_SECONDS } },
-              { label: '15 Minutes', bounds: { start: -FIFTEEN_MINUTES, end: THIRTY_SECONDS } }
-            ]
-          }
-        ]
-      })
-    );
+  h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900; font-size: clamp(34px, 6vw, 64px);
+    letter-spacing: .08em; margin-top: 64px; line-height: 1.05;
+    color: #f2f8ff;
+    text-shadow: 0 0 24px rgba(55, 232, 255, .35);
+  }
+  h1 span { color: var(--cyan); }
+  .sub {
+    margin-top: 18px; max-width: 640px; color: #9db8d2; font-size: 15px; line-height: 1.7;
+  }
+  .sub b { color: var(--amber); font-weight: 600; }
 
-    // Our drone: objects, live data, and history
-    openmct.install(DronePlugin());
+  .cta {
+    display: inline-block; margin-top: 36px;
+    font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 16px;
+    letter-spacing: .14em; text-decoration: none; color: #041018;
+    background: linear-gradient(135deg, var(--cyan), #6ef5d2);
+    padding: 16px 34px; border-radius: 6px;
+    box-shadow: 0 0 28px rgba(55, 232, 255, .45);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .cta:hover { transform: translateY(-2px); box-shadow: 0 0 44px rgba(55, 232, 255, .7); }
+  .cta-hint { display: block; margin-top: 12px; font-size: 12px; color: #6d87a3; }
 
-    document.addEventListener('DOMContentLoaded', function () {
-      openmct.start();
-    });
-  </script>
+  .fleet { margin-top: 72px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px 22px; backdrop-filter: blur(6px);
+    transition: border-color .2s ease;
+  }
+  .card:hover { border-color: rgba(55, 232, 255, .5); }
+  .card h3 {
+    font-family: 'Orbitron', sans-serif; font-size: 14px; font-weight: 700;
+    letter-spacing: .12em; color: #eaf4ff;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .badge {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 600;
+    color: #58f7b1; border: 1px solid rgba(88,247,177,.4); border-radius: 999px;
+    padding: 2px 9px; letter-spacing: .14em;
+  }
+  .metrics { margin-top: 16px; display: grid; gap: 9px; }
+  .metric { display: flex; justify-content: space-between; font-size: 13px; }
+  .metric .k { color: #7fa3c0; }
+  .metric .v { color: var(--cyan); font-weight: 600; min-width: 90px; text-align: right; }
+  .metric .v.warm { color: var(--amber); }
+
+  .foot {
+    margin-top: 88px; border-top: 1px solid var(--line); padding-top: 18px;
+    font-size: 11px; letter-spacing: .1em; color: #5a7390; line-height: 1.9;
+  }
+  .foot a { color: #7fa3c0; }
+</style>
 </head>
 <body>
+<div class="stars"></div>
+<div class="stars2"></div>
+<div class="horizon"></div>
+
+<div class="wrap">
+  <div class="topline">
+    <span>LUNA STATION // OPS DECK 3</span>
+    <span class="live" id="clock">SYNCING…</span>
+  </div>
+
+  <h1>LUNA STATION<br><span>MISSION CONTROL</span></h1>
+  <p class="sub">
+    Three vehicles are on the surface right now, streaming live telemetry
+    once per second. This is a real mission-control console — the same
+    open-source software NASA uses to operate spacecraft — pointed at our
+    <b>simulated lunar fleet</b>. No login. Just fly.
+  </p>
+
+  <a class="cta" href="/console.html">ENTER MISSION CONTROL →</a>
+  <span class="cta-hint">Tip: once inside, open Fleet in the left tree and click any channel.</span>
+
+  <div class="fleet" id="fleet">
+    <div class="card" data-v="alpha">
+      <h3>RECON DRONE ALPHA <span class="badge">AIRBORNE</span></h3>
+      <div class="metrics">
+        <div class="metric"><span class="k">ALTITUDE</span><span class="v" data-key="alpha.altitude">—</span></div>
+        <div class="metric"><span class="k">BATTERY</span><span class="v" data-key="alpha.battery.soc">—</span></div>
+        <div class="metric"><span class="k">GPS SATS</span><span class="v" data-key="alpha.gps.satellites">—</span></div>
+      </div>
+    </div>
+    <div class="card" data-v="bravo">
+      <h3>RECON DRONE BRAVO <span class="badge">AIRBORNE</span></h3>
+      <div class="metrics">
+        <div class="metric"><span class="k">ALTITUDE</span><span class="v" data-key="bravo.altitude">—</span></div>
+        <div class="metric"><span class="k">SPEED</span><span class="v" data-key="bravo.speed">—</span></div>
+        <div class="metric"><span class="k">MOTOR TEMP</span><span class="v warm" data-key="bravo.motor.temp">—</span></div>
+      </div>
+    </div>
+    <div class="card" data-v="charlie">
+      <h3>SURFACE ROVER CHARLIE <span class="badge">ROVING</span></h3>
+      <div class="metrics">
+        <div class="metric"><span class="k">BATTERY</span><span class="v" data-key="charlie.battery.soc">—</span></div>
+        <div class="metric"><span class="k">SPEED</span><span class="v" data-key="charlie.speed">—</span></div>
+        <div class="metric"><span class="k">CHASSIS TILT</span><span class="v warm" data-key="charlie.chassis.tilt">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    BUILT ON <a href="https://github.com/nasa/openmct" target="_blank" rel="noopener">OPEN MCT</a>,
+    NASA'S OPEN-SOURCE MISSION CONTROL FRAMEWORK (APACHE 2.0). NOT AFFILIATED WITH OR ENDORSED BY NASA.<br>
+    TELEMETRY SHOWN IS SIMULATED. WANT THIS DASHBOARD FOR YOUR OWN HARDWARE? GET IN TOUCH.
+  </div>
+</div>
+
+<script>
+  // mission clock
+  setInterval(function () {
+    var d = new Date();
+    document.getElementById('clock').textContent =
+      'LIVE // ' + d.toISOString().slice(11, 19) + ' UTC';
+  }, 1000);
+
+  // units for the ticker
+  var UNITS = {
+    'alpha.altitude': ' m', 'alpha.battery.soc': ' %', 'alpha.gps.satellites': '',
+    'bravo.altitude': ' m', 'bravo.speed': ' m/s', 'bravo.motor.temp': ' °C',
+    'charlie.battery.soc': ' %', 'charlie.speed': ' m/s', 'charlie.chassis.tilt': ' °'
+  };
+
+  // live telemetry ticker via the same WebSocket the console uses
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    var ws = new WebSocket(proto + '://' + location.host + '/realtime');
+    ws.onopen = function () {
+      Object.keys(UNITS).forEach(function (key) {
+        ws.send(JSON.stringify({ type: 'subscribe', key: key }));
+      });
+    };
+    ws.onmessage = function (ev) {
+      var p = JSON.parse(ev.data);
+      var el = document.querySelector('[data-key="' + p.id + '"]');
+      if (el) el.textContent = p.value + (UNITS[p.id] || '');
+    };
+    ws.onclose = function () { setTimeout(connect, 3000); };
+  }
+  connect();
+</script>
 </body>
 </html>

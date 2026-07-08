@@ -46,13 +46,13 @@ const CHANNELS = {
 };
 
 const VEHICLES = [
-  { key: 'alpha',   name: 'Drone Alpha',   kind: 'drone', phase: 0 },
-  { key: 'bravo',   name: 'Drone Bravo',   kind: 'drone', phase: 120 },
-  { key: 'charlie', name: 'Rover Charlie', kind: 'rover', phase: 0 }
+  { key: 'alpha',   name: 'Recon Drone ALPHA',    kind: 'drone', phase: 0 },
+  { key: 'bravo',   name: 'Recon Drone BRAVO',    kind: 'drone', phase: 120 },
+  { key: 'charlie', name: 'Surface Rover CHARLIE', kind: 'rover', phase: 0 }
 ];
 
 const DICTIONARY = {
-  name: 'Fleet',
+  name: 'Luna Station Fleet',
   key: 'fleet',
   vehicles: VEHICLES.map((v) => ({
     key: v.key,
