@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: mission-control-demo
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
