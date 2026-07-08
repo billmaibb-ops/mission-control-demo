@@ -21,6 +21,28 @@ function DronePlugin() {
       return null;
     }
 
+    // Ready-made "Mission Displays": multi-channel charts that exist the
+    // moment the console opens, so visitors see something alive immediately.
+    const OPS_KEY = 'ops';
+    const OPS_DISPLAYS = {
+      'ops.power': {
+        name: 'FLEET POWER — Battery %',
+        channels: ['alpha.battery.soc', 'bravo.battery.soc', 'charlie.battery.soc']
+      },
+      'ops.flight': {
+        name: 'ALPHA FLIGHT PROFILE — Altitude + Speed',
+        channels: ['alpha.altitude', 'alpha.speed']
+      },
+      'ops.thermal': {
+        name: 'FLEET THERMALS — Motor Temps',
+        channels: ['alpha.motor.temp', 'bravo.motor.temp', 'charlie.motor.temp']
+      },
+      'ops.comms': {
+        name: 'COMMS — Signal Strength',
+        channels: ['alpha.signal.rssi', 'bravo.signal.rssi', 'charlie.signal.rssi']
+      }
+    };
+
     // -----------------------------------------------------------------
     // 1. Objects: Fleet folder > vehicle folders > telemetry points
     // -----------------------------------------------------------------
@@ -35,6 +57,26 @@ function DronePlugin() {
               name: dict.name,
               type: 'folder',
               location: 'ROOT'
+            };
+          }
+
+          if (identifier.key === OPS_KEY) {
+            return {
+              identifier,
+              name: 'MISSION DISPLAYS',
+              type: 'folder',
+              location: NAMESPACE + ':' + FLEET_KEY
+            };
+          }
+
+          if (OPS_DISPLAYS[identifier.key]) {
+            const d = OPS_DISPLAYS[identifier.key];
+            return {
+              identifier,
+              name: d.name,
+              type: 'telemetry.plot.overlay',
+              composition: d.channels.map((k) => ({ namespace: NAMESPACE, key: k })),
+              location: NAMESPACE + ':' + OPS_KEY
             };
           }
 
@@ -89,9 +131,10 @@ function DronePlugin() {
         );
       },
       load() {
-        return dictionaryPromise.then((dict) =>
-          dict.vehicles.map((v) => ({ namespace: NAMESPACE, key: v.key }))
-        );
+        return dictionaryPromise.then((dict) => [
+          { namespace: NAMESPACE, key: OPS_KEY },
+          ...dict.vehicles.map((v) => ({ namespace: NAMESPACE, key: v.key }))
+        ]);
       }
     });
 
@@ -106,6 +149,12 @@ function DronePlugin() {
       },
       load(domainObject) {
         return dictionaryPromise.then((dict) => {
+          if (domainObject.identifier.key === OPS_KEY) {
+            return Object.keys(OPS_DISPLAYS).map((k) => ({
+              namespace: NAMESPACE,
+              key: k
+            }));
+          }
           const vehicle = dict.vehicles.find(
             (v) => v.key === domainObject.identifier.key
           );

@@ -74,15 +74,7 @@
       openmct.plugins.Conductor({
         menuOptions: [
           {
-            name: 'Fixed',
-            timeSystem: 'utc',
-            bounds: {
-              start: Date.now() - FIFTEEN_MINUTES,
-              end: Date.now()
-            },
-            records: 10
-          },
-          {
+            // Realtime first = the console streams live by default
             name: 'Realtime',
             timeSystem: 'utc',
             clock: 'local',
@@ -94,6 +86,15 @@
               { label: '1 Hour', bounds: { start: -ONE_HOUR, end: THIRTY_SECONDS } },
               { label: '15 Minutes', bounds: { start: -FIFTEEN_MINUTES, end: THIRTY_SECONDS } }
             ]
+          },
+          {
+            name: 'Fixed',
+            timeSystem: 'utc',
+            bounds: {
+              start: Date.now() - FIFTEEN_MINUTES,
+              end: Date.now()
+            },
+            records: 10
           }
         ]
       })
